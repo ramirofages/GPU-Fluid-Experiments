@@ -7,7 +7,7 @@ import gltoolbox.render.RenderTarget;
 import shaderblox.ShaderBase;
 
 class GPUFluid{
-	// var gl = GL;
+	var gl = GL;
 	public var width  (default, null) : Int;
 	public var height (default, null) : Int;
 
@@ -26,11 +26,24 @@ class GPUFluid{
 	public var applyForcesShader (default, set) : ApplyForces;
 	public var updateDyeShader   (default, set) : UpdateDye;
 
+
 	//Internal Shaders
 	var advectShader                    : Advect = new Advect();
+	var advectVelocityShader            : AdvectVelocity = new AdvectVelocity();
 	var divergenceShader                : Divergence = new Divergence();
 	var pressureSolveShader             : PressureSolve = new PressureSolve();
 	var pressureGradientSubstractShader : PressureGradientSubstract = new PressureGradientSubstract();
+
+	var clearVelocityShader             : ClearVelocity = new ClearVelocity();
+	var clearPressureShader             : ClearPressure = new ClearPressure();
+
+	//Shader consts
+	public var floatVelocity(default, null):Bool = false;
+	public var floatPressure(default, null):Bool = false;
+	public var floatDivergence(default, null):Bool = false;
+	public var floatDye(default, null):Bool = false;
+
+
 
 	//Geometry
 	var textureQuad : GLBuffer;
@@ -42,50 +55,59 @@ class GPUFluid{
 		this.aspectRatio = this.width/this.height;
 		this.cellSize = cellSize;
 
-		var texture_float_linear_supported = true;
-		//setup gl
-		#if js //load floating point extension
-			 //(no need for this unless we use linearFactory - for performance and compatibility, it's best to avoid this extension if possible!)
-			if(GL.getExtension('OES_texture_float_linear') == null) texture_float_linear_supported = false;
-			if(GL.getExtension('OES_texture_float') == null) null;
-		#end
 
 		//geometry
 		//	inner quad, for main fluid shaders
 		textureQuad = gltoolbox.GeometryTools.getCachedUnitQuad();
 
-		//create texture
-		//	seems to run slightly faster with rgba instead of rgb in Chrome?
-		var nearestFactory = gltoolbox.TextureTools.createTextureFactory({
-			channelType: GL.RGB,
-			dataType: GL.FLOAT,
-			filter: GL.NEAREST
-		});
 
-		velocityRenderTarget = new RenderTarget2Phase(width, height, 
+
+		//set texture parameters by GPUCapabilities
+		var floatDataType:Null<Int> = null;
+		var floatLinearFilter:Bool = false;
+		if(GPUCapabilities.writeToFloat){
+			floatDataType = GL.FLOAT;
+			floatLinearFilter = GPUCapabilities.floatTextureLinear;
+		}else if(GPUCapabilities.writeToHalfFloat){
+			floatDataType = GPUCapabilities.HALF_FLOAT;
+			floatLinearFilter = GPUCapabilities.halfFloatTextureLinear;
+		}
+		floatVelocity =
+		floatPressure =
+		floatDivergence = floatDataType != null;
+		floatDye = false;
+
+		//create texture
+		velocityRenderTarget = new RenderTarget2Phase(width, height,
 			gltoolbox.TextureTools.createTextureFactory({
-				channelType: GL.RGB, 
-				dataType: GL.FLOAT, 
-				filter: texture_float_linear_supported ? GL.LINEAR : GL.NEAREST
+				channelType: gl.RGBA,
+				dataType: floatVelocity ? floatDataType : gl.UNSIGNED_BYTE,
+				filter: gl.NEAREST
 			})
 		);
-		pressureRenderTarget = new RenderTarget2Phase(width, height, nearestFactory);
-		divergenceRenderTarget = new RenderTarget(width, height, nearestFactory);
-		dyeRenderTarget = new RenderTarget2Phase( 
+		pressureRenderTarget = new RenderTarget2Phase(width, height, gltoolbox.TextureTools.createTextureFactory({
+			channelType: gl.RGB,
+			dataType: floatPressure ? floatDataType : gl.UNSIGNED_BYTE,
+			filter: gl.NEAREST
+		}));
+		divergenceRenderTarget = new RenderTarget(width, height, gltoolbox.TextureTools.createTextureFactory({
+			channelType: gl.RGB,
+			dataType: floatDivergence ? floatDataType : gl.UNSIGNED_BYTE,
+			filter: gl.NEAREST
+		}));
+		dyeRenderTarget = new RenderTarget2Phase(
 			width,
 			height,
 			gltoolbox.TextureTools.createTextureFactory({
-				channelType: GL.RGB, 
-				dataType: GL.FLOAT, 
-				filter: texture_float_linear_supported ? GL.LINEAR : GL.NEAREST
+				channelType: gl.RGB,
+				dataType: floatDye ? floatDataType : gl.UNSIGNED_BYTE,
+				filter: gl.LINEAR
 			})
 		);
 
-		//texel-space parameters
-		updateCoreShaderUniforms(advectShader);
-		updateCoreShaderUniforms(divergenceShader);
-		updateCoreShaderUniforms(pressureSolveShader);
-		updateCoreShaderUniforms(pressureGradientSubstractShader);
+		 updateAllCoreShaderUniforms();
+
+		 clear();
 	}
 
 	public function step(dt:Float){
@@ -94,7 +116,8 @@ class GPUFluid{
 		//inner quad
 		GL.bindBuffer(GL.ARRAY_BUFFER, textureQuad);
 
-		advect(velocityRenderTarget, dt);
+		// advect(velocityRenderTarget, dt);
+		selfAdvectVelocity(dt);
 
 		applyForces(dt);
 
@@ -113,12 +136,41 @@ class GPUFluid{
 		dyeRenderTarget.resize(width, height);
 		this.width = width;
 		this.height = height;
-	}
+		this.aspectRatio = width/height;
 
+		//update shader uniforms
+		updateAllCoreShaderUniforms();
+
+	}
+	public function updateAllCoreShaderUniforms(){
+		updateCoreShaderUniforms(advectShader);
+		updateCoreShaderUniforms(advectVelocityShader);
+		updateCoreShaderUniforms(divergenceShader);
+		updateCoreShaderUniforms(pressureSolveShader);
+		updateCoreShaderUniforms(pressureGradientSubstractShader);
+		updateCoreShaderUniforms(clearVelocityShader);
+		updateCoreShaderUniforms(clearPressureShader);
+		//user
+		updateCoreShaderUniforms(applyForcesShader);
+		updateCoreShaderUniforms(updateDyeShader);
+	}
 	public inline function clear(){
-		velocityRenderTarget.clear(GL.COLOR_BUFFER_BIT);
-		pressureRenderTarget.clear(GL.COLOR_BUFFER_BIT);
-		dyeRenderTarget.clear(GL.COLOR_BUFFER_BIT);
+		// velocityRenderTarget.clear(GL.COLOR_BUFFER_BIT);
+		// pressureRenderTarget.clear(GL.COLOR_BUFFER_BIT);
+		// dyeRenderTarget.clear(GL.COLOR_BUFFER_BIT);
+
+		gl.viewport(0, 0, this.width, this.height);
+		gl.disable(gl.BLEND);
+		gl.bindBuffer(gl.ARRAY_BUFFER, textureQuad);
+
+		//clear both velocity textures
+		renderShaderTo(clearVelocityShader, velocityRenderTarget);
+		velocityRenderTarget.swap();
+
+		renderShaderTo(clearPressureShader, pressureRenderTarget);
+		pressureRenderTarget.swap();
+
+		dyeRenderTarget.clear(gl.COLOR_BUFFER_BIT);
 	}
 
 	public inline function advect(target:RenderTarget2Phase, dt:Float){
@@ -130,6 +182,15 @@ class GPUFluid{
 		renderShaderTo(advectShader, target);
 
 		target.swap();
+	}
+
+	inline function selfAdvectVelocity(dt:Float){
+		advectVelocityShader.dt.set(dt);
+		advectVelocityShader.velocity.set(velocityRenderTarget.readFromTexture);
+
+		renderShaderTo(advectVelocityShader, velocityRenderTarget);
+
+		velocityRenderTarget.swap();
 	}
 
 	inline function applyForces(dt:Float){
@@ -159,7 +220,7 @@ class GPUFluid{
 			GL.drawArrays(GL.TRIANGLE_STRIP, 0, 4);
 			pressureRenderTarget.swap();
 		}
-		
+
 		pressureSolveShader.deactivate();
 	}
 
@@ -194,6 +255,14 @@ class GPUFluid{
 		shader.aspectRatio.set(this.aspectRatio);
 		shader.invresolution.data.x = 1/this.width;
 		shader.invresolution.data.y = 1/this.height;
+
+		var v:String;
+		v = floatVelocity ? "true" : "false";
+		if(shader.FLOAT_VELOCITY != v) shader.FLOAT_VELOCITY = v;
+		v = floatPressure ? "true" : "false";
+		if(shader.FLOAT_PRESSURE != v) shader.FLOAT_PRESSURE = v;
+		v = floatDivergence ? "true" : "false";
+		if(shader.FLOAT_DIVERGENCE != v) shader.FLOAT_DIVERGENCE = v;
 	}
 
 	inline function set_applyForcesShader(v:ApplyForces):ApplyForces{
@@ -214,10 +283,11 @@ class GPUFluid{
 		//shader specific
 		cellSize = v;
 		advectShader.rdx.set(1/cellSize);
+		advectVelocityShader.rdx.set(1/cellSize);
 		divergenceShader.halfrdx.set(0.5*(1/cellSize));
 		pressureGradientSubstractShader.halfrdx.set(0.5*(1/cellSize));
 		pressureSolveShader.alpha.set(-cellSize*cellSize);
-		return cellSize; 
+		return cellSize;
 	}
 
 	//Coordinate conversions
@@ -231,6 +301,9 @@ class FluidBase extends ShaderBase{}
 
 @:frag('#pragma include("src/shaders/glsl/fluid/advect.frag")')
 class Advect extends FluidBase{}
+
+@:frag('#pragma include("src/shaders/glsl/fluid/advect-velocity.frag")')
+class AdvectVelocity extends FluidBase{}
 
 @:frag('#pragma include("src/shaders/glsl/fluid/velocity-divergence.frag")')
 class Divergence extends FluidBase{}
@@ -260,3 +333,17 @@ class ApplyForces extends FluidBase{}
 	varying vec2 p;
 ')
 class UpdateDye extends FluidBase{}
+
+@:frag('
+void main(){
+	gl_FragColor = packFluidVelocity(vec2(0));
+}
+')
+class ClearVelocity extends FluidBase{}
+
+@:frag('
+void main(){
+	gl_FragColor = packFluidPressure(0.0);
+}
+')
+class ClearPressure extends FluidBase{}

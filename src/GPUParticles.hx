@@ -9,6 +9,7 @@ TODO
 
 package;
 
+import gltoolbox.TextureTools;
 import snow.modules.opengl.GL;
 import snow.api.buffers.Float32Array;
 
@@ -18,42 +19,63 @@ import shaderblox.ShaderBase;
 
 
 class GPUParticles{
-	// var gl = GL;
+	var gl = GL;
 
-	public var particleData:RenderTarget2Phase;
+	public var positionData:RenderTarget2Phase;
+	public var velocityData:RenderTarget2Phase;
+
 	public var particleUVs:GLBuffer;
 
-	public var inititalConditionsShader:InitialConditions;
-	public var stepParticlesShader:StepParticles;
+	public var velocityStepShader:VelocityStep;
+	public var positionStepShader:PositionStep;
+	public var initialPositionShader:InitialPosition;
+	public var initialVelocityShader:InitialVelocity;
 
 	public var dragCoefficient(get, set):Float;
 	public var flowScaleX(get, set):Float;
 	public var flowScaleY(get, set):Float;
 	public var flowVelocityField(get, set):GLTexture;
+	public var flowIsFloat(null, set):Bool;
 
 	public var count(default, null):Int;
 
+	public var floatData(default, null):Bool;
+
 	var textureQuad:GLBuffer;
+	var floatDataType:Null<Int> = null;
 
 	public function new(count:Int){
-		#if js //load floating point texture extension
-		GL.getExtension('OES_texture_float');
-		#end
 		#if !js
-		GL.enable(GL.VERTEX_PROGRAM_POINT_SIZE);//enable gl_PointSize (always enabled in webgl)
+		gl.enable(gl.VERTEX_PROGRAM_POINT_SIZE);//enable gl_PointSize (always enabled in webgl)
 		#end
+
+		if(GPUCapabilities.writeToFloat){
+			floatDataType = GL.FLOAT;
+		}else if(GPUCapabilities.writeToHalfFloat){
+			floatDataType = GPUCapabilities.HALF_FLOAT;
+		}
+
+		floatData = floatDataType != null;
 
 		//quad for writing to textures
 		textureQuad = GeometryTools.getCachedUnitQuad();
 
 		//create shaders
-		inititalConditionsShader = new InitialConditions();
-		stepParticlesShader = new StepParticles();
+		velocityStepShader = new VelocityStep();
+		positionStepShader = new PositionStep();
+		initialPositionShader = new InitialPosition();
+		initialVelocityShader = new InitialVelocity();
+
+		velocityStepShader.FLOAT_DATA = floatData ? "true" : "false";
+		positionStepShader.FLOAT_DATA = floatData ? "true" : "false";
+		initialPositionShader.FLOAT_DATA = floatData ? "true" : "false";
+		initialVelocityShader.FLOAT_DATA = floatData ? "true" : "false";
 
 		//set params
 		this.dragCoefficient = 1;
 		this.flowScaleX = 1;
 		this.flowScaleY = 1;
+		this.flowIsFloat = false;
 
 		//trigger creation of particle textures
 		setCount(count);
@@ -63,33 +85,56 @@ class GPUParticles{
 	}
 
 	public inline function step(dt:Float){
-		//set position and velocity uniforms
-		stepParticlesShader.dt.data = dt;
+		//step velocity
+		velocityStepShader.dt.data = dt;
+		velocityStepShader.positionData.data = positionData.readFromTexture;
+		velocityStepShader.velocityData.data = velocityData.readFromTexture;
+		renderShaderTo(velocityStepShader, velocityData);
 
-		stepParticlesShader.particleData.data = particleData.readFromTexture;
-		renderShaderTo(stepParticlesShader, particleData);
+		//step position
+		positionStepShader.dt.data = dt;
+		positionStepShader.positionData.data = positionData.readFromTexture;
+		positionStepShader.velocityData.data = velocityData.readFromTexture;
+		renderShaderTo(positionStepShader, positionData);
 	}
 
 	public inline function reset(){
-		renderShaderTo(inititalConditionsShader, particleData);
+		renderShaderTo(initialPositionShader, positionData);
+		renderShaderTo(initialVelocityShader, velocityData);
 	}
 
 	public function setCount(newCount:Int):Int{
 		//setup particle data
 		var dataWidth:Int = Math.ceil( Math.sqrt(newCount) );
 		var dataHeight:Int = dataWidth;
-
-		//create particle data texture
-		if(this.particleData != null){
-			this.particleData.resize(dataWidth, dataHeight);
+		//position
+		if(positionData == null){
+			positionData = new RenderTarget2Phase(dataWidth, dataHeight, TextureTools.createTextureFactory({
+				channelType: GL.RGBA,
+				dataType: floatData ? floatDataType : GL.UNSIGNED_BYTE,
+				filter: gl.NEAREST
+			}));
 		}else{
-			this.particleData = new RenderTarget2Phase(dataWidth, dataHeight, gltoolbox.TextureTools.createFloatTextureRGBA);
+			positionData.resize(dataWidth, dataHeight);
+		}
+
+		//velocity
+		if(velocityData == null){
+			velocityData = new RenderTarget2Phase(dataWidth, dataHeight, TextureTools.createTextureFactory({
+				channelType: GL.RGBA,
+				dataType: floatData ? floatDataType : GL.UNSIGNED_BYTE,
+				filter: gl.NEAREST
+			}));
+		}else{
+			velocityData.resize(dataWidth, dataHeight);
 		}
 
 		//create particle vertex buffers that direct vertex shaders to particles to texel coordinates
-		if(this.particleUVs != null) GL.deleteBuffer(this.particleUVs);//clear old buffer
+		if(this.particleUVs != null){
+			gl.deleteBuffer(this.particleUVs);//clear old buffer
+		}
 
-		this.particleUVs = GL.createBuffer();
+		this.particleUVs = gl.createBuffer();
 
 		var arrayUVs = new Float32Array(dataWidth*dataHeight*2);//flattened by columns
 		var index:Int;
@@ -101,37 +146,40 @@ class GPUParticles{
 			}
 		}
 
-		GL.bindBuffer(GL.ARRAY_BUFFER, this.particleUVs);
-		GL.bufferData(GL.ARRAY_BUFFER, arrayUVs, GL.STATIC_DRAW);
-		GL.bindBuffer(GL.ARRAY_BUFFER, null);
+		gl.bindBuffer(gl.ARRAY_BUFFER, this.particleUVs);
+		gl.bufferData(gl.ARRAY_BUFFER, arrayUVs, gl.STATIC_DRAW);
+		gl.bindBuffer(gl.ARRAY_BUFFER, null);
+
+		//compute initial position jitter from particle density
+		var particleSpacing = 2/dataWidth;
+		initialPositionShader.jitterAmount.data = particleSpacing;
 
 		return this.count = newCount;
 	}
 
 	inline function renderShaderTo(shader:ShaderBase, target:RenderTarget2Phase){
-		GL.viewport(0, 0, target.width, target.height);
-		GL.bindFramebuffer(GL.FRAMEBUFFER, target.writeFrameBufferObject);
+		gl.viewport(0, 0, target.width, target.height);
+		gl.bindFramebuffer(gl.FRAMEBUFFER, target.writeFrameBufferObject);
 
-		GL.bindBuffer(GL.ARRAY_BUFFER, textureQuad);
+		gl.bindBuffer(gl.ARRAY_BUFFER, textureQuad);
 
 		shader.activate(true, true);
-		GL.drawArrays(GL.TRIANGLE_STRIP, 0, 4);
+		gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 		shader.deactivate();
 
 		target.swap();
 	}
 
-	inline function get_dragCoefficient()   return stepParticlesShader.dragCoefficient.data;
-	inline function get_flowScaleX()         return stepParticlesShader.flowScale.data.x;
-	inline function get_flowScaleY()         return stepParticlesShader.flowScale.data.y;
-	inline function get_flowVelocityField() return stepParticlesShader.flowVelocityField.data;
+	inline function get_dragCoefficient()   return velocityStepShader.dragCoefficient.data;
+	inline function get_flowScaleX()        return velocityStepShader.flowScale.data.x;
+	inline function get_flowScaleY()        return velocityStepShader.flowScale.data.y;
+	inline function get_flowVelocityField() return velocityStepShader.flowVelocityField.data;
 
-	inline function set_dragCoefficient(v:Float)       return stepParticlesShader.dragCoefficient.data = v;
-	inline function set_flowScaleX(v:Float)             return stepParticlesShader.flowScale.data.x = v;
-	inline function set_flowScaleY(v:Float)             return stepParticlesShader.flowScale.data.y = v;
-	inline function set_flowVelocityField(v:GLTexture){
-		return stepParticlesShader.flowVelocityField.data = v;
-	}
+	inline function set_dragCoefficient(v:Float)       return velocityStepShader.dragCoefficient.data = v;
+	inline function set_flowScaleX(v:Float)            return velocityStepShader.flowScale.data.x = v;
+	inline function set_flowScaleY(v:Float)            return velocityStepShader.flowScale.data.y = v;
+	inline function set_flowVelocityField(v:GLTexture) return velocityStepShader.flowVelocityField.data = v;
+	inline function set_flowIsFloat(v:Bool)            return velocityStepShader.FLOAT_VELOCITY = v ? "true" : "false";
 }
 
 @:vert('
@@ -140,7 +188,7 @@ class GPUParticles{
 
 	void main(){
 		texelCoord = vertexPosition;
-		gl_Position = vec4(vertexPosition*2.0 - vec2(1.0, 1.0), 0.0, 1.0 );//converts to clip space	
+		gl_Position = vec4(vertexPosition*2.0 - vec2(1.0, 1.0), 0.0, 1.0 );//converts to clip space
 	}
 ')
 @:frag('
@@ -149,46 +197,105 @@ class GPUParticles{
 class PlaneTexture extends ShaderBase{}
 
 @:frag('
-	void main(){
-		vec2 ip = vec2((texelCoord.x), (texelCoord.y)) * 2.0 - 1.0;
-		vec2 iv = vec2(0,0);
-		gl_FragColor = vec4(ip, iv);
-	}
-')
-class InitialConditions extends PlaneTexture{}
-
-@:frag('
 	uniform float dt;
-	uniform sampler2D particleData;
+	uniform sampler2D positionData;
+	uniform sampler2D velocityData;
 ')
 class ParticleBase extends PlaneTexture{}
 
 @:frag('
+	//field packing functions
+	#pragma include("src/shaders/glsl/float-packing.glsl")
+	#pragma include("src/shaders/glsl/fluid/field-packing.glsl")
+	#pragma include("src/shaders/glsl/particles/field-packing.glsl")
+
 	uniform float dragCoefficient;
 	uniform vec2 flowScale;
 	uniform sampler2D flowVelocityField;
 
 	void main(){
-		vec2 p = texture2D(particleData, texelCoord).xy;
-		vec2 v = texture2D(particleData, texelCoord).zw;
+		//particle data
+		vec2 p = unpackParticlePosition(texture2D(positionData, texelCoord));
+		vec2 v = unpackParticleVelocity(texture2D(velocityData, texelCoord));
 
-		vec2 vf = texture2D(flowVelocityField, (p+1.)*.5).xy * flowScale;//(converts clip-space p to texel coordinates)
+		//flow velocity
+		vec2 vf = unpackFluidVelocity(texture2D(flowVelocityField, p*.5 + .5)) * flowScale;
+
+		//update particle velocity
 		v += (vf - v) * dragCoefficient;
 
-		p += dt*v;
-		gl_FragColor = vec4(p, v);
+		//write out new velocity
+		gl_FragColor = packParticleVelocity(v);
+
 	}
 ')
-class StepParticles extends ParticleBase{}
+class VelocityStep extends ParticleBase{}
+
+@:frag('
+	//field packing functions
+	#pragma include("src/shaders/glsl/float-packing.glsl")
+	#pragma include("src/shaders/glsl/particles/field-packing.glsl")
+
+	void main(){
+		//particle data
+		vec2 p = unpackParticlePosition(texture2D(positionData, texelCoord));
+		vec2 v = unpackParticleVelocity(texture2D(velocityData, texelCoord));
+
+		//update position
+		p += v * dt;
+
+		//write out new position
+		gl_FragColor = packParticlePosition(p);
+	}
+')
+class PositionStep extends ParticleBase{}
+
+@:frag('
+	//field packing functions
+	#pragma include("src/shaders/glsl/float-packing.glsl")
+	#pragma include("src/shaders/glsl/particles/field-packing.glsl")
+	#pragma include("src/shaders/glsl/math.glsl")
+
+
+	uniform float jitterAmount;
+
+	void main(){
+		vec2 initialPosition = vec2(texelCoord.x, texelCoord.y) * 2.0 - 1.0;
+		//jitter
+		initialPosition.x += rand(initialPosition)*jitterAmount;
+		initialPosition.y += rand(initialPosition + 0.3415)*jitterAmount;
+
+		gl_FragColor = packParticlePosition(initialPosition);
+	}
+')
+class InitialPosition extends PlaneTexture{}
+
+@:frag('
+	//field packing functions
+	#pragma include("src/shaders/glsl/float-packing.glsl")
+	#pragma include("src/shaders/glsl/particles/field-packing.glsl")
+
+	void main(){
+		gl_FragColor = packParticleVelocity(vec2(0));
+	}
+')
+class InitialVelocity extends PlaneTexture{}
 
 @:vert('
-	uniform sampler2D particleData;
+	//field packing functions
+	#pragma include("src/shaders/glsl/float-packing.glsl")
+	#pragma include("src/shaders/glsl/particles/field-packing.glsl")
+
+	uniform sampler2D positionData;
+	uniform sampler2D velocityData;
+
 	attribute vec2 particleUV;
 	varying vec4 color;
-	
+
 	void main(){
-		vec2 p = texture2D(particleData, particleUV).xy;
-		vec2 v = texture2D(particleData, particleUV).zw;
+		vec2 p = unpackParticlePosition(texture2D(positionData, particleUV));
+		vec2 v = unpackParticleVelocity(texture2D(velocityData, particleUV));
+
 		gl_PointSize = 1.0;
 		gl_Position = vec4(p, 0.0, 1.0);
 

@@ -10,8 +10,7 @@ void main(void){
   float B = samplePressue(pressure, texelCoord - vec2(0, invresolution.y));
   float T = samplePressue(pressure, texelCoord + vec2(0, invresolution.y));
 
-  vec2 v = texture2D(velocity, texelCoord).xy;
+  vec2 v = sampleVelocity(velocity, texelCoord);
 
-  gl_FragColor = vec4(v - halfrdx*vec2(R-L, T-B), 0, 1);
+  gl_FragColor = packFluidVelocity(v - halfrdx*vec2(R-L, T-B));
 }
-

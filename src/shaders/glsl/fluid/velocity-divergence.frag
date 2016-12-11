@@ -11,5 +11,5 @@ void main(void){
 	vec2 B = sampleVelocity(velocity, texelCoord - vec2(0, invresolution.y));
 	vec2 T = sampleVelocity(velocity, texelCoord + vec2(0, invresolution.y));
 
-	gl_FragColor = vec4( halfrdx * ((R.x - L.x) + (T.y - B.y)), 0, 0, 1);
+	gl_FragColor = packFluidDivergence( halfrdx * ((R.x - L.x) + (T.y - B.y)));
 }

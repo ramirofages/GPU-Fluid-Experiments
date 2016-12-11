@@ -12,7 +12,7 @@ void main(void){
   float B = samplePressue(pressure, texelCoord - vec2(0, invresolution.y));
   float T = samplePressue(pressure, texelCoord + vec2(0, invresolution.y));
 
-  float bC = texture2D(divergence, texelCoord).x;
+  float bC = sampleDivergence(divergence, texelCoord);
 
-  gl_FragColor = vec4( (L + R + B + T + alpha * bC) * .25, 0, 0, 1 );//rBeta = .25
+  gl_FragColor = packFluidPressure((L + R + B + T + alpha * bC) * .25);//rBeta = .25
 }

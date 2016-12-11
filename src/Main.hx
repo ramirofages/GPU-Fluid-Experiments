@@ -4,7 +4,7 @@ import haxe.Timer;
 
 import snow.modules.opengl.GL;
 import snow.types.Types;
-
+import js.Browser;
 import gltoolbox.render.RenderTarget;
 import shaderblox.ShaderBase;
 import shaderblox.uniforms.UVec2.Vector2;
@@ -12,12 +12,12 @@ import shaderblox.uniforms.UVec2.Vector2;
 typedef UserConfig = {}
 
 class Main extends snow.App{
-	// var gl = GL;
+  var gl = GL;
 	//Simulations
 	var fluid:GPUFluid;
 	var particles:GPUParticles;
 	//Geometry
-	var textureQuad:GLBuffer = null; 
+	var textureQuad:GLBuffer = null;
 	//Framebuffers
 	var screenBuffer:GLFramebuffer = null;	//null for all platforms excluding ios, where it references the defaultFramebuffer (UIStageView.mm)
 	//Render Targets
@@ -36,10 +36,13 @@ class Main extends snow.App{
 	var lastMouse = new Vector2();
 	var lastMouseFluid = new Vector2();
 	var time:Float;
+	var initTime:Float;
 	var lastTime:Float;
-	//Drawing
+	//Drawing parameters
 	var renderParticlesEnabled:Bool = true;
 	var renderFluidEnabled:Bool = true;
+  var pointSize = 1;
+
 	//
 	var performanceMonitor:PerformanceMonitor;
 	//Parameters
@@ -51,18 +54,18 @@ class Main extends snow.App{
 	var simulationQuality(default, set):SimulationQuality;
 
 	static inline var OFFSCREEN_RENDER = false;//seems to be faster when on!
-	
+
 	public function new () {
 
 		performanceMonitor = new PerformanceMonitor(35, null, 2000);
 
 		simulationQuality = Medium;
 
-		#if desktop
-		simulationQuality = High;
-		#elseif ios
-		simulationQuality = iOS;
-		#end
+		// #if desktop
+		// simulationQuality = Medium;
+		// #elseif ios
+		// simulationQuality = iOS;
+		// #end
 
 		#if js
 		performanceMonitor.fpsTooLowCallback = lowerQualityRequired; //auto adjust quality
@@ -91,14 +94,14 @@ class Main extends snow.App{
 	}
 
 	override function config( config:AppConfig ) : AppConfig {
-		
+
 		#if js
 		config.runtime.prevent_default_context_menu = false;
 		#end
 		config.window.borderless = true;
 		config.window.fullscreen = true;
 		config.window.title = "GPU Fluid";
-		//for some reason, window width and height are set initially from config in browsers and 
+		//for some reason, window width and height are set initially from config in browsers and
 		//ignores true size
 		#if js
 		config.window.width = js.Browser.window.innerWidth;
@@ -118,35 +121,41 @@ class Main extends snow.App{
 	}
 
 	function init():Void {
+		//GPUCapabilities.report();
+
 		GL.disable(GL.DEPTH_TEST);
 		GL.disable(GL.CULL_FACE);
 		GL.disable(GL.DITHER);
 
-        #if ios screenBuffer = GL.getParameter(GL.FRAMEBUFFER_BINDING); #end
+        #if ios
+				screenBuffer = GL.getParameter(GL.FRAMEBUFFER_BINDING);
+				#end
 
 		textureQuad = gltoolbox.GeometryTools.createQuad(0, 0, 1, 1);
 
-		if(OFFSCREEN_RENDER){
-			offScreenTarget = new RenderTarget(
-				Math.round(app.runtime.window_width()*offScreenScale),
-				Math.round(app.runtime.window_height()*offScreenScale),
-				gltoolbox.TextureTools.createTextureFactory({
-					channelType: GL.RGB,
-					dataType: GL.UNSIGNED_BYTE,
-					filter: offScreenFilter
-				})
-			);
-		}
+		offScreenTarget = new RenderTarget(
+			Math.round(app.runtime.window_width()*offScreenScale),
+			Math.round(app.runtime.window_height()*offScreenScale),
+			gltoolbox.TextureTools.createTextureFactory({
+				channelType: GL.RGB,
+				dataType: GL.UNSIGNED_BYTE,
+				filter: offScreenFilter
+			})
+		);
 
+    //create shaders
 		screenTextureShader = new ScreenTexture();
 		renderParticlesShader = new ColorParticleMotion();
 		updateDyeShader = new MouseDye();
 		mouseForceShader = new MouseForce();
 
+    //set uniform objects
 		updateDyeShader.mouse.data = mouseFluid;
 		updateDyeShader.lastMouse.data = lastMouseFluid;
 		mouseForceShader.mouse.data = mouseFluid;
 		mouseForceShader.lastMouse.data = lastMouseFluid;
+
+    updatePointSize();
 
 		var cellScale = 32;
 		fluid = new GPUFluid(Math.round(app.runtime.window_width()*fluidScale), Math.round(app.runtime.window_height()*fluidScale), cellScale, fluidIterations);
@@ -157,16 +166,21 @@ class Main extends snow.App{
 		//scale from fluid's velocity field to clipSpace, which the particle velocity uses
 		particles.flowScaleX = 1/(fluid.cellSize * fluid.aspectRatio);
 		particles.flowScaleY = 1/fluid.cellSize;
+		particles.flowIsFloat = fluid.floatVelocity;
 		particles.dragCoefficient = 1;
+		renderParticlesShader.FLOAT_DATA = particles.floatData ? "true" : "false";
+		//dyeColor.set(1, 0, 0);
 
-		#if ios
-		renderParticlesShader.POINT_SIZE = "4.0";
-		#end
+		// #if ios
+		// renderParticlesShader.POINT_SIZE = "4.0";
+		// #end
 
-		lastTime = haxe.Timer.stamp();
+		initTime = haxe.Timer.stamp();
+		lastTime = initTime;
 	}
 
 	override function update( dt:Float ){
+		time = haxe.Timer.stamp() - initTime;
 		dt = 0.016;//@!
 		//Physics
 		//interaction
@@ -177,7 +191,8 @@ class Main extends snow.App{
 		fluid.step(dt);
 
 		particles.flowVelocityField = fluid.velocityRenderTarget.readFromTexture;
-		if(renderParticlesEnabled) particles.step(dt);
+		if(renderParticlesEnabled)
+			particles.step(dt);
 
 		updateLastMouse();
 	}
@@ -189,40 +204,53 @@ class Main extends snow.App{
 
 		//Render
 		//render to offScreen
-		if(OFFSCREEN_RENDER){
-			GL.viewport (0, 0, offScreenTarget.width, offScreenTarget.height);
-			GL.bindFramebuffer(GL.FRAMEBUFFER, offScreenTarget.frameBufferObject);
-		}else{
-			GL.viewport (0, 0, app.runtime.window_width(), app.runtime.window_height());
-			GL.bindFramebuffer(GL.FRAMEBUFFER, screenBuffer);
-		}
+		// if(OFFSCREEN_RENDER){
+		// 	GL.viewport (0, 0, offScreenTarget.width, offScreenTarget.height);
+		// 	GL.bindFramebuffer(GL.FRAMEBUFFER, offScreenTarget.frameBufferObject);
+		// }else{
+		// 	GL.viewport (0, 0, app.runtime.window_width(), app.runtime.window_height());
+		// 	GL.bindFramebuffer(GL.FRAMEBUFFER, screenBuffer);
+		// }
+		gl.viewport (0, 0, offScreenTarget.width, offScreenTarget.height);
+		gl.bindFramebuffer(gl.FRAMEBUFFER, offScreenTarget.frameBufferObject);
 
 		GL.clearColor(0,0,0,1);
 		GL.clear(GL.COLOR_BUFFER_BIT);
+		if(renderFluidEnabled)
+			renderTexture(fluid.dyeRenderTarget.readFromTexture);
 
-		// additive blending
-		GL.enable(GL.BLEND);
-		GL.blendFunc( GL.SRC_ALPHA, GL.SRC_ALPHA );
-		GL.blendEquation(GL.FUNC_ADD);
+			//render offscreen texture to screen
+		gl.viewport (0, 0, app.runtime.window_width(), app.runtime.window_height());
+		gl.bindFramebuffer(gl.FRAMEBUFFER, screenBuffer);
 
-		if(renderParticlesEnabled) renderParticles();
-		if(renderFluidEnabled) renderTexture(fluid.dyeRenderTarget.readFromTexture);
+		renderTexture(offScreenTarget.texture);
 
-		GL.disable(GL.BLEND);
+		if(renderParticlesEnabled)
+		{
+			GL.enable(GL.BLEND);
+			GL.blendFunc( GL.SRC_ALPHA, GL.SRC_ALPHA );
+			GL.blendEquation(GL.FUNC_ADD);
+
+			renderParticles();
+
+			GL.disable(GL.BLEND);
+		}
+
+
 
 		//render offScreen texture to screen
-		if(OFFSCREEN_RENDER){
-			GL.viewport (0, 0, app.runtime.window_width(), app.runtime.window_height());
-			GL.bindFramebuffer(GL.FRAMEBUFFER, screenBuffer);
-			renderTexture(offScreenTarget.texture);
-		}
+		// if(OFFSCREEN_RENDER){
+		// 	GL.viewport (0, 0, app.runtime.window_width(), app.runtime.window_height());
+		// 	GL.bindFramebuffer(GL.FRAMEBUFFER, screenBuffer);
+		// 	renderTexture(offScreenTarget.texture);
+		// }
 	}
 
 	inline function renderTexture(texture:GLTexture){
 		GL.bindBuffer (GL.ARRAY_BUFFER, textureQuad);
 
 		screenTextureShader.texture.data = texture;
-		
+
 		screenTextureShader.activate(true, true);
 		GL.drawArrays(GL.TRIANGLE_STRIP, 0, 4);
 		screenTextureShader.deactivate();
@@ -233,7 +261,10 @@ class Main extends snow.App{
 		GL.bindBuffer(GL.ARRAY_BUFFER, particles.particleUVs);
 
 		//set uniforms
-		renderParticlesShader.particleData.data = particles.particleData.readFromTexture;
+		//renderParticlesShader.particleData.data = particles.particleData.readFromTexture;
+
+		renderParticlesShader.positionData.data = particles.positionData.readFromTexture;
+		renderParticlesShader.velocityData.data = particles.velocityData.readFromTexture;
 
 		//draw points
 		renderParticlesShader.activate(true, true);
@@ -241,16 +272,29 @@ class Main extends snow.App{
 		renderParticlesShader.deactivate();
 	}
 
+  function updatePointSize(){
+		renderParticlesShader.POINT_SIZE = Std.int(pointSize) + ".0";
+	}
+
 	function updateSimulationTextures(){
 		//only resize if there is a change
 		var w:Int, h:Int;
-		w = Math.round(app.runtime.window_width()*fluidScale); h = Math.round(app.runtime.window_height()*fluidScale);
-		if(w != fluid.width || h != fluid.height) fluid.resize(w, h);
+		w = Math.round(app.runtime.window_width()*fluidScale);
+		h = Math.round(app.runtime.window_height()*fluidScale);
 
-		w = Math.round(app.runtime.window_width()*offScreenScale); h = Math.round(app.runtime.window_height()*offScreenScale);
-		if(w != offScreenTarget.width || h != offScreenTarget.height) offScreenTarget.resize(w, h);
+		if(w != fluid.width || h != fluid.height)
+			fluid.resize(w, h);
+
+		w = Math.round(app.runtime.window_width()*offScreenScale);
+		h = Math.round(app.runtime.window_height()*offScreenScale);
+		if(w != offScreenTarget.width || h != offScreenTarget.height)
+			offScreenTarget.resize(w, h);
 
 		if(particleCount != particles.count) particles.setCount(particleCount);
+
+		particles.flowScaleX = 1/(fluid.cellSize * fluid.aspectRatio);
+		particles.flowScaleY = 1/fluid.cellSize;
+		particles.dragCoefficient = 1;
 	}
 
 	function set_simulationQuality(quality:SimulationQuality):SimulationQuality{
@@ -261,37 +305,50 @@ class Main extends snow.App{
 				fluidIterations = 30;
 				offScreenScale = 1/1;
 				offScreenFilter = GL.NEAREST;
+        pointSize = 1;
 			case High:
 				particleCount = 1 << 20;
 				fluidScale = 1/4;
 				fluidIterations = 20;
 				offScreenScale = 1/1;
 				offScreenFilter = GL.NEAREST;
+        pointSize = 1;
+
 			case Medium:
 				particleCount = 1 << 18;
 				fluidScale = 1/4;
 				fluidIterations = 18;
 				offScreenScale = 1/1;
 				offScreenFilter = GL.NEAREST;
+        pointSize = 1;
+
 			case Low:
 				particleCount = 1 << 16;
 				fluidScale = 1/5;
 				fluidIterations = 14;
 				offScreenScale = 1/1;
 				offScreenFilter = GL.NEAREST;
+        pointSize = 2;
+
 			case UltraLow:
 				particleCount = 1 << 14;
 				fluidScale = 1/6;
 				fluidIterations = 12;
 				offScreenScale = 1/2;
 				offScreenFilter = GL.NEAREST;
+        pointSize = 2;
+
 			case iOS:
 				particleCount = 1 << 14;
 				fluidScale = 1/10;
 				fluidIterations = 6;
 				offScreenScale = 1/2;
 				offScreenFilter = GL.LINEAR;
+        pointSize = 5;
+
 		}
+		renderParticlesEnabled = particleCount > 1;
+    // renderParticlesEnabled = false;
 		return simulationQuality = quality;
 	}
 
@@ -318,6 +375,8 @@ class Main extends snow.App{
 		trace('Average FPS: '+performanceMonitor.fpsAverage+', lowering quality to: '+newQuality);
 		this.simulationQuality = newQuality;
 		updateSimulationTextures();
+    updatePointSize();
+
 	}
 
 	//!# Requires better upsampling before use!
@@ -338,13 +397,15 @@ class Main extends snow.App{
 		trace('Raising quality to: '+newQuality);
 		this.simulationQuality = newQuality;
 		updateSimulationTextures();
+    updatePointSize();
+
 	}
 
 
 	//---- Interface ----//
 
 	function reset():Void{
-		particles.reset();	
+		particles.reset();
 		fluid.clear();
 	}
 
@@ -353,7 +414,7 @@ class Main extends snow.App{
 	inline function windowToClipSpaceY(y:Float) return ((app.runtime.window_height()-y)/app.runtime.window_height())*2 - 1;
 
 	override function onmousedown( x : Float , y : Float , button : Int, _, _){
-		this.isMouseDown = true; 
+		this.isMouseDown = true;
 	}
 	override function onmouseup( x : Float , y : Float , button : Int, _, _){
 		this.isMouseDown = false;
@@ -377,45 +438,47 @@ class Main extends snow.App{
 		lastMousePointKnown = true && mousePointKnown;
 	}
 
-	// override function ontouchdown(x:Float,y:Float,touch_id:Int,_){
-	// 	updateTouchCoordinate(x,y);
-	// 	updateLastMouse();
-	// 	this.isMouseDown = true; 
-	// }
+	override function ontouchdown(x:Float, y:Float, dx:Float, dy:Float, touch_id:Int, timestamp:Float){
+		updateTouchCoordinate(x,y);
+		updateLastMouse();
+		this.isMouseDown = true;
+	}
 
-	// override function ontouchup(x:Float,y:Float,touch_id:Int,_){
-	// 	updateTouchCoordinate(x,y);
-	// 	this.isMouseDown = false;
-	// }
+	override function ontouchup(x:Float, y:Float, dx:Float, dy:Float, touch_id:Int, timestamp:Float){
+		updateTouchCoordinate(x,y);
+		this.isMouseDown = false;
+	}
 
-	// override function ontouchmove(x:Float,y:Float,dx:Float,dy:Float,touch_id:Int,_){
-	// 	updateTouchCoordinate(x,y);
-	// }
+	override function ontouchmove(x:Float, y:Float, dx:Float, dy:Float, touch_id:Int, timestamp:Float){
+		updateTouchCoordinate(x,y);
+	}
 
 
-	// function updateTouchCoordinate(x:Float, y:Float){
-	// 	x = x*app.runtime.window_width();
-	// 	y = y*app.runtime.window_height();
-	// 	mouse.set(x, y);
-	// 	mouseFluid.set(
-	// 		windowToClipSpaceX(x),
-	// 		windowToClipSpaceY(y)
-	// 	);
-	// 	mousePointKnown = true;
-	// }
+	function updateTouchCoordinate(x:Float, y:Float){
+		x = x*app.runtime.window_width();
+		y = y*app.runtime.window_height();
+		mouse.set(x, y);
+		mouseFluid.set(
+			// windowToClipSpaceX(x),
+			// windowToClipSpaceY(y)
+			fluid.clipToAspectSpaceX(windowToClipSpaceX(mouse.x)),
+			fluid.clipToAspectSpaceY(windowToClipSpaceY(mouse.y))
+		);
+		mousePointKnown = true;
+	}
 
 
 	var lshiftDown = false;
 	var rshiftDown = false;
 	override function onkeydown( keyCode : Int, _, _, _, _, _){
 		switch (keyCode) {
-			case Key.lshift: 
+			case Key.lshift:
 				lshiftDown = true;
-			case Key.rshift: 
+			case Key.rshift:
 				rshiftDown = true;
 		}
 	}
-	
+
 	override function onkeyup( keyCode : Int , _, _, _, _, _){
 		switch (keyCode) {
 			case Key.key_r:
@@ -427,9 +490,9 @@ class Main extends snow.App{
 				renderFluidEnabled = !renderFluidEnabled;
 			case Key.key_s:
 				fluid.clear();
-			case Key.lshift: 
+			case Key.lshift:
 				lshiftDown = false;
-			case Key.rshift: 
+			case Key.rshift:
 				rshiftDown = false;
 		}
 	}
@@ -452,8 +515,8 @@ class ScreenTexture extends ShaderBase {}
 @:vert('
 	const float POINT_SIZE = 1.0;
 	void main(){
-		vec2 p = texture2D(particleData, particleUV).xy;
-		vec2 v = texture2D(particleData, particleUV).zw;
+		vec2 p = unpackParticlePosition(texture2D(positionData, particleUV));
+		vec2 v = unpackParticleVelocity(texture2D(velocityData, particleUV));
 		gl_PointSize = POINT_SIZE;
 		gl_Position = vec4(p, 0.0, 1.0);
 		float speed = length(v);
@@ -478,9 +541,9 @@ class ColorParticleMotion extends GPUParticles.RenderParticles{}
 		color.g *= (0.9494);
 		color.b *= (0.9696);
 
-		if(isMouseDown){			
+		if(isMouseDown){
 			vec2 mouseVelocity = (mouse - lastMouse)/dt;
-			
+
 			//compute tapered distance to mouse line segment
 			float projection;
 			float l = distanceToSegment(mouse, lastMouse, p, projection);
@@ -488,7 +551,7 @@ class ColorParticleMotion extends GPUParticles.RenderParticles{}
 			float projectedFraction = 1.0 - clamp(projection, 0.0, 1.0)*taperFactor;
 			float R = 0.025;
 			float m = exp(-l/R);
-			
+
 			float speed = length(mouseVelocity);
 			float x = clamp((speed * speed * 0.02 - l * 5.0) * projectedFraction, 0., 1.);
 			color.rgb += m * (
@@ -513,7 +576,7 @@ class MouseDye extends GPUFluid.UpdateDye{}
 		if(isMouseDown){
 			vec2 mouseVelocity = -(lastMouse - mouse)/dt;
 			// mouse = mouse - (lastMouse - mouse) * 2.0;//predict mouse position
-				
+
 			//compute tapered distance to mouse line segment
 			float projection;
 			float l = distanceToSegment(mouse, lastMouse, p, projection);
@@ -525,7 +588,7 @@ class MouseDye extends GPUFluid.UpdateDye{}
 			vec2 targetVelocity = mouseVelocity * dx * 1.4;
 			v += (targetVelocity - v)*m;
 		}
-		gl_FragColor = vec4(v, 0, 1.);
+		gl_FragColor = packFluidVelocity(v);
 	}
 ')
 class MouseForce extends GPUFluid.ApplyForces{}
