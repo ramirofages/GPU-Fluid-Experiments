@@ -1,7 +1,6 @@
 package;
 
 import haxe.Timer;
-
 import snow.modules.opengl.GL;
 import snow.types.Types;
 import js.Browser;
@@ -11,7 +10,8 @@ import shaderblox.uniforms.UVec2.Vector2;
 
 typedef UserConfig = {}
 
-class Main extends snow.App{
+
+@:expose class Main extends snow.App{
   var gl = GL;
 	//Simulations
 	var fluid:GPUFluid;
@@ -39,8 +39,9 @@ class Main extends snow.App{
 	var initTime:Float;
 	var lastTime:Float;
 	//Drawing parameters
-	var renderParticlesEnabled:Bool = true;
-	var renderFluidEnabled:Bool = true;
+	static var renderParticlesEnabled:Bool = true;
+	static var renderFluidEnabled:Bool = true;
+  static var simulation_enabled:Bool = true;
   var pointSize = 1;
 
 	//
@@ -53,21 +54,20 @@ class Main extends snow.App{
 	var offScreenFilter:Int;
 	var simulationQuality(default, set):SimulationQuality;
 
-	static inline var OFFSCREEN_RENDER = false;//seems to be faster when on!
 
 	public function new () {
 
 		performanceMonitor = new PerformanceMonitor(35, null, 2000);
 
 		simulationQuality = Medium;
+    #if js
+			var is_mobile : Bool = (~/(iPad|iPhone|iPod|Android)/g).match(Browser.navigator.userAgent);
+			if(is_mobile)
+      {
+        simulationQuality = iOS;
+			}
 
-		// #if desktop
-		// simulationQuality = Medium;
-		// #elseif ios
-		// simulationQuality = iOS;
-		// #end
 
-		#if js
 		performanceMonitor.fpsTooLowCallback = lowerQualityRequired; //auto adjust quality
 
 		//Extract quality parameter, ?q= and set simulation quality
@@ -122,6 +122,8 @@ class Main extends snow.App{
 
 	function init():Void {
 		//GPUCapabilities.report();
+
+    datGUI_setup();
 
 		GL.disable(GL.DEPTH_TEST);
 		GL.disable(GL.CULL_FACE);
@@ -180,6 +182,8 @@ class Main extends snow.App{
 	}
 
 	override function update( dt:Float ){
+    if(!simulation_enabled) return;
+
 		time = haxe.Timer.stamp() - initTime;
 		dt = 0.016;//@!
 		//Physics
@@ -198,19 +202,8 @@ class Main extends snow.App{
 	}
 
 	override function tick (delta:Float):Void {
-		// time = haxe.Timer.stamp();
-		// var dt = time - lastTime; //60fps ~ 0.016
-		// lastTime = time;
+    if(!simulation_enabled) return;
 
-		//Render
-		//render to offScreen
-		// if(OFFSCREEN_RENDER){
-		// 	GL.viewport (0, 0, offScreenTarget.width, offScreenTarget.height);
-		// 	GL.bindFramebuffer(GL.FRAMEBUFFER, offScreenTarget.frameBufferObject);
-		// }else{
-		// 	GL.viewport (0, 0, app.runtime.window_width(), app.runtime.window_height());
-		// 	GL.bindFramebuffer(GL.FRAMEBUFFER, screenBuffer);
-		// }
 		gl.viewport (0, 0, offScreenTarget.width, offScreenTarget.height);
 		gl.bindFramebuffer(gl.FRAMEBUFFER, offScreenTarget.frameBufferObject);
 
@@ -409,6 +402,25 @@ class Main extends snow.App{
 		fluid.clear();
 	}
 
+  function datGUI_setup():Void{
+    //dat.GUI
+				//create controls
+				// var gui = new dat.GUI({autoPlace: true});
+				//particle count
+				// var particleCountGUI = gui.add(particles, 'count').name('Particle Count').listen();
+				// particleCountGUI.__li.className = particleCountGUI.__li.className+' disabled';
+				// untyped particleCountGUI.__input.disabled = true;//	disable editing
+				// //quality
+				// gui.add(this, 'simulationQuality', Type.allEnums(SimulationQuality)).onChange(function(v){
+				// 	js.Browser.window.location.href = StringTools.replace(Browser.window.location.href, Browser.window.location.search, '') + '?q=' + v;//remove query string
+				// }).name('Quality');//.listen();
+				// //fluid iterations
+				// gui.add(this, 'fluidIterations', 1, 50).name('Solver Iterations').onChange(function(v) fluidIterations = v);
+				// //rest particles
+				// gui.add({f:particles.reset}, 'f').name('Reset Particles');
+				// //stop fluid
+				// gui.add({f:fluid.clear}, 'f').name('Stop Fluid');
+  }
 	//coordinate conversion
 	inline function windowToClipSpaceX(x:Float) return (x/app.runtime.window_width())*2 - 1;
 	inline function windowToClipSpaceY(y:Float) return ((app.runtime.window_height()-y)/app.runtime.window_height())*2 - 1;
