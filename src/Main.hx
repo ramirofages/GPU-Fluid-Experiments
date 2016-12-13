@@ -549,9 +549,13 @@ class ColorParticleMotion extends GPUParticles.RenderParticles{}
 	uniform vec2 lastMouse;
 	void main(){
 		vec4 color = texture2D(dye, texelCoord);
-		color.r *= (0.9797);
-		color.g *= (0.9494);
-		color.b *= (0.9696);
+    const float duration_offset = 0.02;
+
+    color.r *= (0.9797 + duration_offset);
+    color.g *= (0.9494 + duration_offset);
+    color.b *= (0.9696 + duration_offset);
+
+    color -= sign(color)*(0.006 - (1.0 - color)*0.004);
 
 		if(isMouseDown){
 			vec2 mouseVelocity = (mouse - lastMouse)/dt;
@@ -583,7 +587,8 @@ class MouseDye extends GPUFluid.UpdateDye{}
 	uniform vec2 mouse; //aspect space coordinates
 	uniform vec2 lastMouse;
 	void main(){
-		vec2 v = texture2D(velocity, texelCoord).xy;
+		// vec2 v = texture2D(velocity, texelCoord).xy;
+    vec2 v = sampleVelocity(velocity, texelCoord);
 		v.xy *= 0.999;
 		if(isMouseDown){
 			vec2 mouseVelocity = -(lastMouse - mouse)/dt;
