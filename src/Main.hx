@@ -39,9 +39,9 @@ typedef UserConfig = {}
 	var initTime:Float;
 	var lastTime:Float;
 	//Drawing parameters
-	static var renderParticlesEnabled:Bool = true;
-	static var renderFluidEnabled:Bool = true;
-  static var simulation_enabled:Bool = true;
+	var renderParticlesEnabled:Bool = true;
+	var renderFluidEnabled:Bool = true;
+  var simulation_enabled:Bool = true;
   var pointSize = 1;
 
 	//
@@ -54,9 +54,10 @@ typedef UserConfig = {}
 	var offScreenFilter:Int;
 	var simulationQuality(default, set):SimulationQuality;
 
+  static var instance : Main;
 
 	public function new () {
-
+    instance = this;
 		performanceMonitor = new PerformanceMonitor(35, null, 2000);
 
 		simulationQuality = Medium;
@@ -123,7 +124,6 @@ typedef UserConfig = {}
 	function init():Void {
 		//GPUCapabilities.report();
 
-    datGUI_setup();
 
 		GL.disable(GL.DEPTH_TEST);
 		GL.disable(GL.CULL_FACE);
@@ -402,25 +402,6 @@ typedef UserConfig = {}
 		fluid.clear();
 	}
 
-  function datGUI_setup():Void{
-    //dat.GUI
-				//create controls
-				// var gui = new dat.GUI({autoPlace: true});
-				//particle count
-				// var particleCountGUI = gui.add(particles, 'count').name('Particle Count').listen();
-				// particleCountGUI.__li.className = particleCountGUI.__li.className+' disabled';
-				// untyped particleCountGUI.__input.disabled = true;//	disable editing
-				// //quality
-				// gui.add(this, 'simulationQuality', Type.allEnums(SimulationQuality)).onChange(function(v){
-				// 	js.Browser.window.location.href = StringTools.replace(Browser.window.location.href, Browser.window.location.search, '') + '?q=' + v;//remove query string
-				// }).name('Quality');//.listen();
-				// //fluid iterations
-				// gui.add(this, 'fluidIterations', 1, 50).name('Solver Iterations').onChange(function(v) fluidIterations = v);
-				// //rest particles
-				// gui.add({f:particles.reset}, 'f').name('Reset Particles');
-				// //stop fluid
-				// gui.add({f:fluid.clear}, 'f').name('Stop Fluid');
-  }
 	//coordinate conversion
 	inline function windowToClipSpaceX(x:Float) return (x/app.runtime.window_width())*2 - 1;
 	inline function windowToClipSpaceY(y:Float) return ((app.runtime.window_height()-y)/app.runtime.window_height())*2 - 1;

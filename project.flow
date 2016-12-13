@@ -21,7 +21,6 @@
       }
     },
     files : {
-      dat_gui : { path:'html/dat.gui.min.js => dat.gui.min.js'},
       template: { path:'html/index.html => index.html'}
     }
 
