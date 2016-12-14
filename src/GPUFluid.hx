@@ -86,12 +86,12 @@ class GPUFluid{
 			})
 		);
 		pressureRenderTarget = new RenderTarget2Phase(width, height, gltoolbox.TextureTools.createTextureFactory({
-			channelType: gl.RGB,
+			channelType: gl.RGBA,
 			dataType: floatPressure ? floatDataType : gl.UNSIGNED_BYTE,
 			filter: gl.NEAREST
 		}));
 		divergenceRenderTarget = new RenderTarget(width, height, gltoolbox.TextureTools.createTextureFactory({
-			channelType: gl.RGB,
+			channelType: gl.RGBA,
 			dataType: floatDivergence ? floatDataType : gl.UNSIGNED_BYTE,
 			filter: gl.NEAREST
 		}));
@@ -99,7 +99,7 @@ class GPUFluid{
 			width,
 			height,
 			gltoolbox.TextureTools.createTextureFactory({
-				channelType: gl.RGB,
+				channelType: gl.RGBA,
 				dataType: floatDye ? floatDataType : gl.UNSIGNED_BYTE,
 				filter: gl.LINEAR
 			})

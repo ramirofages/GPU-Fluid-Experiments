@@ -83,7 +83,7 @@ typedef TShader = {
 
 		simulationQuality = Medium;
     #if js
-			var is_mobile : Bool = (~/(iPad|iPhone|iPod|Android)/g).match(Browser.navigator.userAgent);
+			var is_mobile : Bool = (~/(iPad|iPhone|iPod|Android|Windows Phone)/g).match(Browser.navigator.userAgent);
 			if(is_mobile)
       {
         simulationQuality = iOS;
@@ -688,11 +688,10 @@ class ColorParticleMotion extends GPUParticles.RenderParticles{}
 	void main(){
 		vec4 color = texture2D(dye, texelCoord);
 		//darken
-		color -= sign(color)*(0.006 - (1.0 - color)*0.004);
-		// color *= 0.99;
+		color -= sign(color)*(0.006 - (1.0 - color)*0.004 );
 
 		//saturate, needs to be carefully balanced with darken
-		// color.rgb = saturation(color.rgb, 0.99);
+		// color.rgb = saturation(color.rgb, 0.999);
 
 		if(isMouseDown){
 			vec2 mouseVelocity = (mouse - lastMouse)/dt;
@@ -714,7 +713,7 @@ class ColorParticleMotion extends GPUParticles.RenderParticles{}
 			float m6 = m4*m*m;
 
 			color.rgb +=
-				0.004*dyeColor*(16.0*m3*(0.5*x+1.0)+m2) //color
+				0.009*dyeColor*(16.0*m3*(0.5*x+1.0)+m2) //color
 			  + 0.03*m6*m*m*vec3(1.0)*(0.5*m3*x + 1.0);     //white
 		}
 
@@ -734,7 +733,7 @@ class MouseDye extends GPUFluid.UpdateDye{}
 		vec2 v = sampleVelocity(velocity, texelCoord);
 		// v -= abs(sign(v))*0.2*dt;
 		// v -= sign(v)*(0.005 - (1.0 - v)*0.001);
-		v *= 0.999;
+		v *= 0.99;
 		if(isMouseDown){
 			vec2 mouseVelocity = -(lastMouse - mouse)/dt;
 			// mouse = mouse - (lastMouse - mouse) * 2.0;//predict mouse position
