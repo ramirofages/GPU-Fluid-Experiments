@@ -109,7 +109,18 @@ class GPUFluid{
 
 		 clear();
 	}
-
+	public function updateAllCoreShaderUniforms(){
+		updateCoreShaderUniforms(advectShader);
+		updateCoreShaderUniforms(advectVelocityShader);
+		updateCoreShaderUniforms(divergenceShader);
+		updateCoreShaderUniforms(pressureSolveShader);
+		updateCoreShaderUniforms(pressureGradientSubstractShader);
+		updateCoreShaderUniforms(clearVelocityShader);
+		updateCoreShaderUniforms(clearPressureShader);
+		//user
+		updateCoreShaderUniforms(applyForcesShader);
+		updateCoreShaderUniforms(updateDyeShader);
+	}
 	public function step(dt:Float){
 		GL.viewport(0, 0, this.width, this.height);
 
@@ -142,22 +153,8 @@ class GPUFluid{
 		updateAllCoreShaderUniforms();
 
 	}
-	public function updateAllCoreShaderUniforms(){
-		updateCoreShaderUniforms(advectShader);
-		updateCoreShaderUniforms(advectVelocityShader);
-		updateCoreShaderUniforms(divergenceShader);
-		updateCoreShaderUniforms(pressureSolveShader);
-		updateCoreShaderUniforms(pressureGradientSubstractShader);
-		updateCoreShaderUniforms(clearVelocityShader);
-		updateCoreShaderUniforms(clearPressureShader);
-		//user
-		updateCoreShaderUniforms(applyForcesShader);
-		updateCoreShaderUniforms(updateDyeShader);
-	}
+
 	public inline function clear(){
-		// velocityRenderTarget.clear(GL.COLOR_BUFFER_BIT);
-		// pressureRenderTarget.clear(GL.COLOR_BUFFER_BIT);
-		// dyeRenderTarget.clear(GL.COLOR_BUFFER_BIT);
 
 		gl.viewport(0, 0, this.width, this.height);
 		gl.disable(gl.BLEND);

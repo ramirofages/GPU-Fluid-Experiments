@@ -2,14 +2,27 @@ package;
 
 import haxe.Timer;
 import snow.modules.opengl.GL;
+import shaderblox.uniforms.UTexture;
+import snow.Snow;
+
 import snow.types.Types;
 import js.Browser;
 import gltoolbox.render.RenderTarget;
 import shaderblox.ShaderBase;
 import shaderblox.uniforms.UVec2.Vector2;
+import shaderblox.uniforms.UVec3.Vector3;
+import shaderblox.uniforms.UVec4.Vector4;
+import hxColorToolkit.spaces.HSB;
+
+using hxColorToolkit.ColorToolkit;
+
 
 typedef UserConfig = {}
 
+typedef TShader = {
+	function activate(_:Bool, _:Bool):Void;
+	function deactivate():Void;
+}
 
 @:expose class Main extends snow.App{
   var gl = GL;
@@ -23,18 +36,23 @@ typedef UserConfig = {}
 	//Render Targets
 	var offScreenTarget:RenderTarget;
 	//Shaders
-	var screenTextureShader   : ScreenTexture;
+  var blitTextureShader:BlitTexture;
+  var renderFluidShader:FluidRender;
 	var renderParticlesShader : ColorParticleMotion;
 	var updateDyeShader       : MouseDye;
 	var mouseForceShader      : MouseForce;
 	//Window
-	var isMouseDown:Bool = false;
+  static inline var MOUSE_ALWAYS_DOWN:Bool = true;
+
+	var isMouseDown:Bool = MOUSE_ALWAYS_DOWN;
 	var mousePointKnown:Bool = false;
 	var lastMousePointKnown:Bool = false;
 	var mouse = new Vector2();
 	var mouseFluid = new Vector2();
 	var lastMouse = new Vector2();
 	var lastMouseFluid = new Vector2();
+  var frameRegionLBRT = new Vector4();
+
 	var time:Float;
 	var initTime:Float;
 	var lastTime:Float;
@@ -42,6 +60,9 @@ typedef UserConfig = {}
 	var renderParticlesEnabled:Bool = true;
 	var renderFluidEnabled:Bool = true;
   var simulation_enabled:Bool = true;
+  var hueCycleEnabled:Bool = MOUSE_ALWAYS_DOWN;
+  var dyeColorHSB = new HSB(180, 100, 100);
+	var dyeColor = new Vector3();
   var pointSize = 1;
 
 	//
@@ -116,9 +137,7 @@ typedef UserConfig = {}
 	}
 
 	override function ready(){
-
 		init();
-
 	}
 
 	function init():Void {
@@ -146,17 +165,23 @@ typedef UserConfig = {}
 		);
 
     //create shaders
-		screenTextureShader = new ScreenTexture();
+    blitTextureShader = new BlitTexture();
 		renderParticlesShader = new ColorParticleMotion();
+    renderFluidShader = new FluidRender();
+
 		updateDyeShader = new MouseDye();
 		mouseForceShader = new MouseForce();
 
     //set uniform objects
 		updateDyeShader.mouse.data = mouseFluid;
 		updateDyeShader.lastMouse.data = lastMouseFluid;
+    updateDyeShader.dyeColor.data = dyeColor;
+
 		mouseForceShader.mouse.data = mouseFluid;
 		mouseForceShader.lastMouse.data = lastMouseFluid;
 
+    renderFluidShader.regionLBRT.data = frameRegionLBRT;
+    blitTextureShader.regionLBRT.data = frameRegionLBRT;
     updatePointSize();
 
 		var cellScale = 32;
@@ -171,11 +196,13 @@ typedef UserConfig = {}
 		particles.flowIsFloat = fluid.floatVelocity;
 		particles.dragCoefficient = 1;
 		renderParticlesShader.FLOAT_DATA = particles.floatData ? "true" : "false";
-		//dyeColor.set(1, 0, 0);
+
+    dyeColor.set(1, 0, 0);
 
 		// #if ios
 		// renderParticlesShader.POINT_SIZE = "4.0";
 		// #end
+    updateFrameRegion();
 
 		initTime = haxe.Timer.stamp();
 		lastTime = initTime;
@@ -185,6 +212,8 @@ typedef UserConfig = {}
     if(!simulation_enabled) return;
 
 		time = haxe.Timer.stamp() - initTime;
+    performanceMonitor.recordFrameTime(dt);
+
 		dt = 0.016;//@!
 		//Physics
 		//interaction
@@ -195,13 +224,31 @@ typedef UserConfig = {}
 		fluid.step(dt);
 
 		particles.flowVelocityField = fluid.velocityRenderTarget.readFromTexture;
-		if(renderParticlesEnabled)
+
+    if(renderParticlesEnabled)
 			particles.step(dt);
+
+    if(hueCycleEnabled)
+      dyeColorHSB.hue += 1.2;
+
+    if(isMouseDown){
+    			//cycle further by mouse velocity
+          var window_height = app.runtime.window_height();
+          var window_width = app.runtime.window_height();
+
+    			if(hueCycleEnabled){
+    				var vx = (mouse.x - lastMouse.x)/(dt*window_width);
+    				var vy = (mouse.y - lastMouse.y)/(dt*window_height);
+    				dyeColorHSB.hue += Math.sqrt(vx*vx + vy*vy)*0.5;
+    			}
+    			var rgb = dyeColorHSB.toRGB();
+    			dyeColor.set(rgb.red/255, rgb.green/255, rgb.blue/255);
+    		}
 
 		updateLastMouse();
 	}
 
-	override function tick (delta:Float):Void {
+  override function tick (delta:Float):Void {
     if(!simulation_enabled) return;
 
 		gl.viewport (0, 0, offScreenTarget.width, offScreenTarget.height);
@@ -209,61 +256,58 @@ typedef UserConfig = {}
 
 		GL.clearColor(0,0,0,1);
 		GL.clear(GL.COLOR_BUFFER_BIT);
+
 		if(renderFluidEnabled)
-			renderTexture(fluid.dyeRenderTarget.readFromTexture);
+    {
+      // renderTexture(fluid.dyeRenderTarget.readFromTexture);
+      renderTexture(renderFluidShader, fluid.dyeRenderTarget.readFromTexture);
+    }
 
 			//render offscreen texture to screen
 		gl.viewport (0, 0, app.runtime.window_width(), app.runtime.window_height());
-		gl.bindFramebuffer(gl.FRAMEBUFFER, screenBuffer);
 
-		renderTexture(offScreenTarget.texture);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, screenBuffer);
+
+		// renderTexture(offScreenTarget.texture);
+    renderTexture(blitTextureShader, offScreenTarget.texture);
 
 		if(renderParticlesEnabled)
 		{
 			GL.enable(GL.BLEND);
-			GL.blendFunc( GL.SRC_ALPHA, GL.SRC_ALPHA );
 			GL.blendEquation(GL.FUNC_ADD);
+      GL.blendFunc( GL.SRC_ALPHA, GL.SRC_ALPHA );
 
-			renderParticles();
+      renderParticlesShader.dye.data = offScreenTarget.texture;
+      renderParticles(renderParticlesShader);
+			//renderParticles();
 
 			GL.disable(GL.BLEND);
 		}
+	}
+  inline function renderParticles(shader:{>TShader, positionData:UTexture, velocityData:UTexture} ):Void{
+    //set vertices
+    gl.bindBuffer(gl.ARRAY_BUFFER, particles.particleUVs);
 
+    //set uniforms
+    shader.positionData.data = particles.positionData.readFromTexture;
+    shader.velocityData.data = particles.velocityData.readFromTexture;
 
+    //draw points
+    shader.activate(true, true);
+    gl.drawArrays(gl.POINTS, 0, particles.count);
+    shader.deactivate();
+  }
 
-		//render offScreen texture to screen
-		// if(OFFSCREEN_RENDER){
-		// 	GL.viewport (0, 0, app.runtime.window_width(), app.runtime.window_height());
-		// 	GL.bindFramebuffer(GL.FRAMEBUFFER, screenBuffer);
-		// 	renderTexture(offScreenTarget.texture);
-		// }
+  inline function renderTexture(shader:{>TShader, texture:UTexture}, texture:GLTexture){
+		gl.bindBuffer (gl.ARRAY_BUFFER, textureQuad);
+
+		shader.texture.data = texture;
+
+		shader.activate(true, true);
+		gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+		shader.deactivate();
 	}
 
-	inline function renderTexture(texture:GLTexture){
-		GL.bindBuffer (GL.ARRAY_BUFFER, textureQuad);
-
-		screenTextureShader.texture.data = texture;
-
-		screenTextureShader.activate(true, true);
-		GL.drawArrays(GL.TRIANGLE_STRIP, 0, 4);
-		screenTextureShader.deactivate();
-	}
-
-	inline function renderParticles():Void{
-		//set vertices
-		GL.bindBuffer(GL.ARRAY_BUFFER, particles.particleUVs);
-
-		//set uniforms
-		//renderParticlesShader.particleData.data = particles.particleData.readFromTexture;
-
-		renderParticlesShader.positionData.data = particles.positionData.readFromTexture;
-		renderParticlesShader.velocityData.data = particles.velocityData.readFromTexture;
-
-		//draw points
-		renderParticlesShader.activate(true, true);
-		GL.drawArrays(GL.POINTS, 0, particles.count);
-		renderParticlesShader.deactivate();
-	}
 
   function updatePointSize(){
 		renderParticlesShader.POINT_SIZE = Std.int(pointSize) + ".0";
@@ -393,8 +437,27 @@ typedef UserConfig = {}
     updatePointSize();
 
 	}
+  inline function updateLastMouse(){
+		lastMouse.set(mouse.x, mouse.y);
+		lastMouseFluid.set(
+			fluid.clipToAspectSpaceX(windowToClipSpaceX(mouse.x)),
+			fluid.clipToAspectSpaceY(windowToClipSpaceY(mouse.y))
+		);
+		lastMousePointKnown = true && mousePointKnown;
+	}
+  public function updateFrameRegion()
+  {
+    var frameEl = js.Browser.document.getElementById('frame');
+    var window_height = app.runtime.window_height();
+    var window_width = app.runtime.window_height();
 
-
+    frameRegionLBRT.set(
+      frameEl.offsetLeft/window_width,
+      1 - (frameEl.offsetTop + frameEl.offsetHeight)/window_height,
+      (frameEl.offsetLeft + frameEl.offsetWidth)/window_width,
+      1 - frameEl.offsetTop/window_height
+    );
+  }
 	//---- Interface ----//
 
 	function reset():Void{
@@ -408,9 +471,13 @@ typedef UserConfig = {}
 
 	override function onmousedown( x : Float , y : Float , button : Int, _, _){
 		this.isMouseDown = true;
+    this.hueCycleEnabled = true;
+
 	}
 	override function onmouseup( x : Float , y : Float , button : Int, _, _){
-		this.isMouseDown = false;
+    if(!MOUSE_ALWAYS_DOWN){
+      this.isMouseDown = false;
+    }
 	}
 
 	override function onmousemove( x : Float , y : Float , xrel:Int, yrel:Int, _, _) {
@@ -422,19 +489,12 @@ typedef UserConfig = {}
 		mousePointKnown = true;
 	}
 
-	inline function updateLastMouse(){
-		lastMouse.set(mouse.x, mouse.y);
-		lastMouseFluid.set(
-			fluid.clipToAspectSpaceX(windowToClipSpaceX(mouse.x)),
-			fluid.clipToAspectSpaceY(windowToClipSpaceY(mouse.y))
-		);
-		lastMousePointKnown = true && mousePointKnown;
-	}
 
 	override function ontouchdown(x:Float, y:Float, dx:Float, dy:Float, touch_id:Int, timestamp:Float){
-		updateTouchCoordinate(x,y);
+    updateTouchCoordinate(x,y);
 		updateLastMouse();
 		this.isMouseDown = true;
+		this.hueCycleEnabled = true;
 	}
 
 	override function ontouchup(x:Float, y:Float, dx:Float, dy:Float, touch_id:Int, timestamp:Float){
@@ -452,8 +512,6 @@ typedef UserConfig = {}
 		y = y*app.runtime.window_height();
 		mouse.set(x, y);
 		mouseFluid.set(
-			// windowToClipSpaceX(x),
-			// windowToClipSpaceY(y)
 			fluid.clipToAspectSpaceX(windowToClipSpaceX(mouse.x)),
 			fluid.clipToAspectSpaceY(windowToClipSpaceY(mouse.y))
 		);
@@ -489,6 +547,7 @@ typedef UserConfig = {}
 				rshiftDown = false;
 		}
 	}
+
 }
 
 enum SimulationQuality{
@@ -501,24 +560,114 @@ enum SimulationQuality{
 }
 
 
+
+
 @:vert('#pragma include("src/shaders/glsl/no-transform.vert")')
-@:frag('#pragma include("src/shaders/glsl/quad-texture.frag")')
-class ScreenTexture extends ShaderBase {}
+@:frag('
+	uniform sampler2D texture;
+	uniform vec4 regionLBRT;
+	varying vec2 texelCoord;
+
+	float isInRegion(in vec2 origin, in vec2 end, in vec2 p){
+		vec2 iv = step(origin, p) * (1.0 - step(end, p));
+		return iv.x*iv.y;
+	}
+
+	void main(void){
+		vec2 o = regionLBRT.xy;
+		vec2 e = regionLBRT.zw;
+		vec2 center = (o+e)*.5;
+
+		float inRegion = isInRegion(o, e, texelCoord);
+		float outRegion = 1.0 - inRegion;
+
+		//sample texture
+		vec3 c = texture2D(texture, texelCoord).rgb;
+
+		//brightness & contrast
+		const float dBrightnessOut  = 0.04;
+		c += dBrightnessOut*outRegion;
+
+		//tv glow
+		c += max((0.5 - distance(texelCoord, center)) * vec3(0.3), 0.0) * outRegion;
+
+		gl_FragColor = vec4(c, 1.0);
+	}
+')
+class BlitTexture extends ShaderBase {}
+
+@:vert('#pragma include("src/shaders/glsl/no-transform.vert")')
+@:frag('
+	uniform sampler2D texture;
+	uniform vec4 regionLBRT;
+	varying vec2 texelCoord;
+
+	float isInRegion(in vec2 origin, in vec2 end, in vec2 p){
+		vec2 iv = step(origin, p) * (1.0 - step(end, p));
+		return iv.x*iv.y;
+	}
+
+	vec3 saturation(in vec3 rgb, in float amount){
+		const vec3 CW = vec3(0.299, 0.587, 0.114);//NTSC conversion weights
+		vec3 bw = vec3(dot(rgb, CW));
+		return mix(bw, rgb, amount);
+	}
+
+	void main(void){
+		vec2 o = regionLBRT.xy;
+		vec2 e = regionLBRT.zw;
+		vec2 center = (o+e)*.5;
+
+		float inRegion = isInRegion(o, e, texelCoord);
+		float outRegion = 1.0 - inRegion;
+
+		//sample texture
+		vec3 c = texture2D(texture, texelCoord).rgb;
+
+		//vignette outside region
+		float l = distance(texelCoord, vec2(.5)) - 0.05;
+		float vignetteMultiplier = 1.0 - clamp(0., 1.0, 2.0*l*l*l*l)*(outRegion);
+
+		//saturation
+		float minSaturation = 0.0;
+		c = saturation(c, max(inRegion, minSaturation));
+
+		//tv glow
+		c *= vignetteMultiplier;
+
+		gl_FragColor = vec4(c, 1.0);
+	}
+')
+class FluidRender extends ShaderBase {}
 
 @:vert('
+	uniform sampler2D dye;
+
+	vec3 saturation(in vec3 rgb, in float amount){
+		const vec3 CW = vec3(0.299, 0.587, 0.114);
+		vec3 bw = vec3(dot(rgb, CW));//uses NTSC conversion weights
+		return mix(bw, rgb, amount);
+	}
+
 	const float POINT_SIZE = 1.0;
+
 	void main(){
 		vec2 p = unpackParticlePosition(texture2D(positionData, particleUV));
 		vec2 v = unpackParticleVelocity(texture2D(velocityData, particleUV));
+
+
 		gl_PointSize = POINT_SIZE;
 		gl_Position = vec4(p, 0.0, 1.0);
+
+		vec3 dyeColor = texture2D(dye, p*.5+.5).rgb;
+
+		float dyeLevel = dot(dyeColor, vec3(1.0));//dot(dyeColor, vec3(0.299, 0.587, 0.114));
+
 		float speed = length(v);
 		float x = clamp(speed * 2.0, 0., 1.);
-		color.rgb = (
-				mix(vec3(40.4, 0.0, 35.0) / 300.0, vec3(0.2, 47.8, 100) / 100.0, x)
-				+ (vec3(63.1, 92.5, 100) / 100.) * x*x*x * .1
-		);
-		color.a = 1.0;
+
+		color.rgb = saturation(dyeColor, 1.0 + x) + (dyeLevel)*.05 + x*x*0.05;
+		color.a = clamp(dyeLevel, 0.0, 1.0);
 	}
 ')
 class ColorParticleMotion extends GPUParticles.RenderParticles{}
@@ -528,15 +677,22 @@ class ColorParticleMotion extends GPUParticles.RenderParticles{}
 	uniform bool isMouseDown;
 	uniform vec2 mouse; //aspect space coordinates
 	uniform vec2 lastMouse;
+	uniform vec3 dyeColor;
+
+	vec3 saturation(in vec3 rgb, in float amount){
+		const vec3 CW = vec3(0.299, 0.587, 0.114);
+		vec3 bw = vec3(dot(rgb, CW));//uses NTSC conversion weights
+		return mix(bw, rgb, amount);
+	}
+
 	void main(){
 		vec4 color = texture2D(dye, texelCoord);
-    const float duration_offset = 0.02;
+		//darken
+		color -= sign(color)*(0.006 - (1.0 - color)*0.004);
+		// color *= 0.99;
 
-    color.r *= (0.9797 + duration_offset);
-    color.g *= (0.9494 + duration_offset);
-    color.b *= (0.9696 + duration_offset);
-
-    color -= sign(color)*(0.006 - (1.0 - color)*0.004);
+		//saturate, needs to be carefully balanced with darken
+		// color.rgb = saturation(color.rgb, 0.99);
 
 		if(isMouseDown){
 			vec2 mouseVelocity = (mouse - lastMouse)/dt;
@@ -546,15 +702,20 @@ class ColorParticleMotion extends GPUParticles.RenderParticles{}
 			float l = distanceToSegment(mouse, lastMouse, p, projection);
 			float taperFactor = 0.6;
 			float projectedFraction = 1.0 - clamp(projection, 0.0, 1.0)*taperFactor;
-			float R = 0.025;
-			float m = exp(-l/R);
 
-			float speed = length(mouseVelocity);
-			float x = clamp((speed * speed * 0.02 - l * 5.0) * projectedFraction, 0., 1.);
-			color.rgb += m * (
-				mix(vec3(2.4, 0, 5.9) / 60.0, vec3(0.2, 51.8, 100) / 30.0, x)
-					+ (vec3(100) / 100.) * pow(x, 9.)
-			);
+			float speed = 0.016*length(mouseVelocity)/dt;
+			float x = speed;
+
+			float R = 0.15;
+			float m = 1.0*exp(-l/R);
+			float m2 = m*m;
+			float m3 = m2*m;
+			float m4 = m3*m;
+			float m6 = m4*m*m;
+
+			color.rgb +=
+				0.004*dyeColor*(16.0*m3*(0.5*x+1.0)+m2) //color
+			  + 0.03*m6*m*m*vec3(1.0)*(0.5*m3*x + 1.0);     //white
 		}
 
 		gl_FragColor = color;
@@ -564,13 +725,16 @@ class MouseDye extends GPUFluid.UpdateDye{}
 
 @:frag('
 	#pragma include("src/shaders/glsl/geom.glsl")
+	// #pragma include("src/shaders/glsl/math.glsl")
 	uniform bool isMouseDown;
 	uniform vec2 mouse; //aspect space coordinates
 	uniform vec2 lastMouse;
+
 	void main(){
-		// vec2 v = texture2D(velocity, texelCoord).xy;
-    vec2 v = sampleVelocity(velocity, texelCoord);
-		v.xy *= 0.999;
+		vec2 v = sampleVelocity(velocity, texelCoord);
+		// v -= abs(sign(v))*0.2*dt;
+		// v -= sign(v)*(0.005 - (1.0 - v)*0.001);
+		v *= 0.999;
 		if(isMouseDown){
 			vec2 mouseVelocity = -(lastMouse - mouse)/dt;
 			// mouse = mouse - (lastMouse - mouse) * 2.0;//predict mouse position
@@ -580,12 +744,17 @@ class MouseDye extends GPUFluid.UpdateDye{}
 			float l = distanceToSegment(mouse, lastMouse, p, projection);
 			float taperFactor = 0.6;//1 => 0 at lastMouse, 0 => no tapering
 			float projectedFraction = 1.0 - clamp(projection, 0.0, 1.0)*taperFactor;
-			float R = 0.015;
+			float R = 0.02;
 			float m = exp(-l/R); //drag coefficient
 			m *= projectedFraction * projectedFraction;
 			vec2 targetVelocity = mouseVelocity * dx * 1.4;
-			v += (targetVelocity - v)*m;
+
+			v += (targetVelocity - v)*(m + m*m*m*8.0)*(0.2);
 		}
+
+		//add a wee bit of random noise
+		// v += (rand((texelCoord + v))*2.0 - 1.0)*0.5;
+
 		gl_FragColor = packFluidVelocity(v);
 	}
 ')

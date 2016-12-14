@@ -151,8 +151,8 @@ class GPUParticles{
 		gl.bindBuffer(gl.ARRAY_BUFFER, null);
 
 		//compute initial position jitter from particle density
-		// var particleSpacing = 2/dataWidth;
-		// initialPositionShader.jitterAmount.data = particleSpacing;
+		var particleSpacing = 2/dataWidth;
+		initialPositionShader.jitterAmount.data = particleSpacing;
 
 		return this.count = newCount;
 	}
