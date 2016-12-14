@@ -20,42 +20,8 @@
 
     <body style="padding: 0; margin: 0; background-color: #111111;">
 
-      <div id="frame" style= "
-        z-index: 9999;
-        position:fixed;
-        pointer-events: none;
-        width: 1000vw;
-        height: 1000vh;">
+      <p id="fps" style="color: white;"> 213123</p>
 
-      </div>
-      <script type="text/javascript">
-
-
-           window.addEventListener('resize', function(event){
-            setClass();
-           });
-
-           function setClass() {
-                //set correct class to body so that we are using correct media query
-                //we have a bunch of them and the are getting overwritten
-                //with this we can target specific size
-                var classToSet = 'rad-' + window.innerWidth + 'x' + window.innerHeight;
-                document.getElementsByTagName('body')[0].className = classToSet;
-            };
-            setClass();
-
-
-            window.addEventListener("message", receiveMessage, false);
-
-            function receiveMessage(event)
-            {
-                if (event.data == 'update') {
-                    window.updateFrameRegion();
-                }
-            }
-
-
-        </script>
       <script type="text/javascript" src="./GPUFluid.js"></script>
     </body>
 

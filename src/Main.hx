@@ -51,7 +51,6 @@ typedef TShader = {
 	var mouseFluid = new Vector2();
 	var lastMouse = new Vector2();
 	var lastMouseFluid = new Vector2();
-  var frameRegionLBRT = new Vector4();
 
 	var time:Float;
 	var initTime:Float;
@@ -180,8 +179,7 @@ typedef TShader = {
 		mouseForceShader.mouse.data = mouseFluid;
 		mouseForceShader.lastMouse.data = lastMouseFluid;
 
-    renderFluidShader.regionLBRT.data = frameRegionLBRT;
-    blitTextureShader.regionLBRT.data = frameRegionLBRT;
+
     updatePointSize();
 
 		var cellScale = 32;
@@ -199,10 +197,6 @@ typedef TShader = {
 
     dyeColor.set(1, 0, 0);
 
-		// #if ios
-		// renderParticlesShader.POINT_SIZE = "4.0";
-		// #end
-    updateFrameRegion();
 
 		initTime = haxe.Timer.stamp();
 		lastTime = initTime;
@@ -213,6 +207,8 @@ typedef TShader = {
 
 		time = haxe.Timer.stamp() - initTime;
     performanceMonitor.recordFrameTime(dt);
+	  var fps_window = js.Browser.document.getElementById('fps');
+		fps_window.innerHTML = performanceMonitor.fpsAverage+"";
 
 		dt = 0.016;//@!
 		//Physics
@@ -445,19 +441,7 @@ typedef TShader = {
 		);
 		lastMousePointKnown = true && mousePointKnown;
 	}
-  public function updateFrameRegion()
-  {
-    var frameEl = js.Browser.document.getElementById('frame');
-    var window_height = app.runtime.window_height();
-    var window_width = app.runtime.window_height();
 
-    frameRegionLBRT.set(
-      frameEl.offsetLeft/window_width,
-      1 - (frameEl.offsetTop + frameEl.offsetHeight)/window_height,
-      (frameEl.offsetLeft + frameEl.offsetWidth)/window_width,
-      1 - frameEl.offsetTop/window_height
-    );
-  }
 	//---- Interface ----//
 
 	function reset():Void{
@@ -565,31 +549,14 @@ enum SimulationQuality{
 @:vert('#pragma include("src/shaders/glsl/no-transform.vert")')
 @:frag('
 	uniform sampler2D texture;
-	uniform vec4 regionLBRT;
 	varying vec2 texelCoord;
 
-	float isInRegion(in vec2 origin, in vec2 end, in vec2 p){
-		vec2 iv = step(origin, p) * (1.0 - step(end, p));
-		return iv.x*iv.y;
-	}
 
 	void main(void){
-		vec2 o = regionLBRT.xy;
-		vec2 e = regionLBRT.zw;
-		vec2 center = (o+e)*.5;
-
-		float inRegion = isInRegion(o, e, texelCoord);
-		float outRegion = 1.0 - inRegion;
 
 		//sample texture
 		vec3 c = texture2D(texture, texelCoord).rgb;
 
-		//brightness & contrast
-		const float dBrightnessOut  = 0.04;
-		c += dBrightnessOut*outRegion;
-
-		//tv glow
-		c += max((0.5 - distance(texelCoord, center)) * vec3(0.3), 0.0) * outRegion;
 
 		gl_FragColor = vec4(c, 1.0);
 	}
@@ -599,41 +566,13 @@ class BlitTexture extends ShaderBase {}
 @:vert('#pragma include("src/shaders/glsl/no-transform.vert")')
 @:frag('
 	uniform sampler2D texture;
-	uniform vec4 regionLBRT;
 	varying vec2 texelCoord;
 
-	float isInRegion(in vec2 origin, in vec2 end, in vec2 p){
-		vec2 iv = step(origin, p) * (1.0 - step(end, p));
-		return iv.x*iv.y;
-	}
-
-	vec3 saturation(in vec3 rgb, in float amount){
-		const vec3 CW = vec3(0.299, 0.587, 0.114);//NTSC conversion weights
-		vec3 bw = vec3(dot(rgb, CW));
-		return mix(bw, rgb, amount);
-	}
 
 	void main(void){
-		vec2 o = regionLBRT.xy;
-		vec2 e = regionLBRT.zw;
-		vec2 center = (o+e)*.5;
-
-		float inRegion = isInRegion(o, e, texelCoord);
-		float outRegion = 1.0 - inRegion;
 
 		//sample texture
 		vec3 c = texture2D(texture, texelCoord).rgb;
-
-		//vignette outside region
-		float l = distance(texelCoord, vec2(.5)) - 0.05;
-		float vignetteMultiplier = 1.0 - clamp(0., 1.0, 2.0*l*l*l*l)*(outRegion);
-
-		//saturation
-		float minSaturation = 0.0;
-		c = saturation(c, max(inRegion, minSaturation));
-
-		//tv glow
-		c *= vignetteMultiplier;
 
 		gl_FragColor = vec4(c, 1.0);
 	}
