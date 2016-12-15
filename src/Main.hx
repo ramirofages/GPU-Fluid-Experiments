@@ -66,6 +66,7 @@ typedef TShader = {
 
 	//
 	var performanceMonitor:PerformanceMonitor;
+	var particlesSupported: Bool;
 	//Parameters
 	var particleCount:Int;
 	var fluidScale:Float;
@@ -81,66 +82,46 @@ typedef TShader = {
 		performanceMonitor = new PerformanceMonitor(35, null, 2000);
 
 		simulationQuality = Medium;
-    #if js
-			var is_mobile : Bool = (~/(iPad|iPhone|iPod|Android|Windows Phone)/g).match(Browser.navigator.userAgent);
-			if(is_mobile)
-      {
-        simulationQuality = iOS;
-			}
+		var is_mobile : Bool = (~/(iPad|iPhone|iPod|Android|Windows Phone)/g).match(Browser.navigator.userAgent);
+		if(is_mobile)
+    {
+      simulationQuality = iOS;
+		}
+
 
 
 		performanceMonitor.fpsTooLowCallback = lowerQualityRequired; //auto adjust quality
 
-		//Extract quality parameter, ?q= and set simulation quality
-		var urlParams = js.Web.getParams();
-		if(urlParams.exists('q')){
-			var q = StringTools.trim(urlParams.get('q').toLowerCase());
-			//match enum
-			for(e in Type.allEnums(SimulationQuality)){
-				var name = Type.enumConstructor(e).toLowerCase();
-				if(q == name){
-					simulationQuality = e;
-					performanceMonitor.fpsTooLowCallback = null; //disable auto quality adjusting
-					break;
-				}
-			}
-		}
-		//Extract iterations
-		if(urlParams.exists('iterations')){
-			var iterationsParam = Std.parseInt(urlParams.get('iterations'));
-			if(Std.is(iterationsParam, Int))
-				fluidIterations = iterationsParam;
-		}
-		#end
+
 	}
 
 	override function config( config:AppConfig ) : AppConfig {
 
-		#if js
 		config.runtime.prevent_default_context_menu = false;
-		#end
 		config.window.borderless = true;
 		config.window.fullscreen = true;
-		config.window.title = "GPU Fluid";
 		//for some reason, window width and height are set initially from config in browsers and
 		//ignores true size
-		#if js
 		config.window.width = js.Browser.window.innerWidth;
 		config.window.height = js.Browser.window.innerHeight;
-		#end
 
 		config.render.antialiasing = 0;
 
-
-	    return config;
+    return config;
 	}
 
 	override function ready(){
+		particlesSupported = true;
+		if(!GPUCapabilities.writeToFloat && !GPUCapabilities.writeToHalfFloat)
+		{
+			particlesSupported = false;
+			Browser.alert("not supported");
+		}
 		init();
 	}
 
 	function init():Void {
-		//GPUCapabilities.report();
+		GPUCapabilities.report();
 
 
 		GL.disable(GL.DEPTH_TEST);
@@ -165,7 +146,10 @@ typedef TShader = {
 
     //create shaders
     blitTextureShader = new BlitTexture();
-		renderParticlesShader = new ColorParticleMotion();
+
+		if(particlesSupported)
+			renderParticlesShader = new ColorParticleMotion();
+
     renderFluidShader = new FluidRender();
 
 		updateDyeShader = new MouseDye();
@@ -193,7 +177,9 @@ typedef TShader = {
 		particles.flowScaleY = 1/fluid.cellSize;
 		particles.flowIsFloat = fluid.floatVelocity;
 		particles.dragCoefficient = 1;
-		renderParticlesShader.FLOAT_DATA = particles.floatData ? "true" : "false";
+
+		if(particlesSupported)
+			renderParticlesShader.FLOAT_DATA = particles.floatData ? "true" : "false";
 
     dyeColor.set(1, 0, 0);
 
@@ -207,6 +193,7 @@ typedef TShader = {
 
 		time = haxe.Timer.stamp() - initTime;
     performanceMonitor.recordFrameTime(dt);
+
 	  var fps_window = js.Browser.document.getElementById('fps');
 		fps_window.innerHTML = performanceMonitor.fpsAverage+"";
 
@@ -221,7 +208,7 @@ typedef TShader = {
 
 		particles.flowVelocityField = fluid.velocityRenderTarget.readFromTexture;
 
-    if(renderParticlesEnabled)
+    if(renderParticlesEnabled && particlesSupported)
 			particles.step(dt);
 
     if(hueCycleEnabled)
@@ -267,7 +254,7 @@ typedef TShader = {
 		// renderTexture(offScreenTarget.texture);
     renderTexture(blitTextureShader, offScreenTarget.texture);
 
-		if(renderParticlesEnabled)
+		if(renderParticlesEnabled && particlesSupported)
 		{
 			GL.enable(GL.BLEND);
 			GL.blendEquation(GL.FUNC_ADD);
@@ -275,7 +262,6 @@ typedef TShader = {
 
       renderParticlesShader.dye.data = offScreenTarget.texture;
       renderParticles(renderParticlesShader);
-			//renderParticles();
 
 			GL.disable(GL.BLEND);
 		}
@@ -306,7 +292,8 @@ typedef TShader = {
 
 
   function updatePointSize(){
-		renderParticlesShader.POINT_SIZE = Std.int(pointSize) + ".0";
+		if(particlesSupported)
+			renderParticlesShader.POINT_SIZE = Std.int(pointSize) + ".0";
 	}
 
 	function updateSimulationTextures(){
@@ -377,7 +364,7 @@ typedef TShader = {
 				fluidIterations = 6;
 				offScreenScale = 1/2;
 				offScreenFilter = GL.LINEAR;
-        pointSize = 5;
+        pointSize = 4;
 
 		}
 		renderParticlesEnabled = particleCount > 1;
@@ -409,7 +396,7 @@ typedef TShader = {
 		this.simulationQuality = newQuality;
 		updateSimulationTextures();
     updatePointSize();
-
+		trace("lower quality required");
 	}
 
 	//!# Requires better upsampling before use!
