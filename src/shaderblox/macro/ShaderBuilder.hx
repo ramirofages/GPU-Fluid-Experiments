@@ -128,8 +128,8 @@ class ShaderBuilder
 		fragSource = "";
 
 		var defaultESPrecision = "
-precision lowp float;
-precision lowp sampler2D;
+precision mediump float;
+precision mediump sampler2D;
 //asd
 \n";
 		vertSource += defaultESPrecision;

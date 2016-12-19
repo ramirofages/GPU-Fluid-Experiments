@@ -71,6 +71,8 @@ class ShaderBase
 		GL.compileShader (vertexShader);
 
 		if (GL.getShaderParameter (vertexShader, GL.COMPILE_STATUS) == 0) {
+			untyped __js__('webgl_unsupported_shader_feature()');
+			
 			trace("Error compiling vertex shader: " + GL.getShaderInfoLog(vertexShader));
 			trace("\n"+vertSource);
 			throw "Error compiling vertex shader";
@@ -81,6 +83,8 @@ class ShaderBase
 		GL.compileShader (fragmentShader);
 
 		if (GL.getShaderParameter (fragmentShader, GL.COMPILE_STATUS) == 0) {
+			untyped __js__('webgl_unsupported_shader_feature()');
+
 			trace("Error compiling fragment shader: " + GL.getShaderInfoLog(fragmentShader)+"\n");
 			var lines = fragSource.split("\n");
 			var i = 0;
@@ -97,6 +101,7 @@ class ShaderBase
 		GL.linkProgram (shaderProgram);
 
 		if (GL.getProgramParameter (shaderProgram, GL.LINK_STATUS) == 0) {
+			untyped __js__('webgl_unsupported_shader_feature()');
 			throw "Unable to initialize the shader program.\n"+GL.getProgramInfoLog(shaderProgram);
 		}
 

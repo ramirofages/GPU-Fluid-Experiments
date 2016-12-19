@@ -5,6 +5,7 @@
 
         <link rel="icon" href="favicon.png"/>
         <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, user-scalable=no, initial-scale=1, maximum-scale=1">
 
         <style>
             #app {
@@ -20,7 +21,13 @@
 
     <body style="padding: 0; margin: 0; background-color: #111111;">
 
-      <p id="fps" style="color: white;"> 213123</p>
+      <!-- <p id="fps" style="color: white;"> 213123</p> -->
+      
+      <script type="text/javascript" >
+        function webgl_unsupported_shader_feature(){
+          alert("something failed");
+        }
+      </script>
 
       <script type="text/javascript" src="./GPUFluid.js"></script>
     </body>

@@ -115,7 +115,6 @@ typedef TShader = {
 		if(!GPUCapabilities.writeToFloat && !GPUCapabilities.writeToHalfFloat)
 		{
 			particlesSupported = false;
-			Browser.alert("not supported");
 		}
 		init();
 	}
@@ -194,8 +193,8 @@ typedef TShader = {
 		time = haxe.Timer.stamp() - initTime;
     performanceMonitor.recordFrameTime(dt);
 
-	  var fps_window = js.Browser.document.getElementById('fps');
-		fps_window.innerHTML = performanceMonitor.fpsAverage+"";
+	  // var fps_window = js.Browser.document.getElementById('fps');
+		// fps_window.innerHTML = performanceMonitor.fpsAverage+"";
 
 		dt = 0.016;//@!
 		//Physics
@@ -336,7 +335,7 @@ typedef TShader = {
 
 			case Medium:
 				particleCount = 1 << 18;
-				fluidScale = 1/4;
+				fluidScale = 1/5;
 				fluidIterations = 18;
 				offScreenScale = 1/1;
 				offScreenFilter = GL.NEAREST;
@@ -360,15 +359,16 @@ typedef TShader = {
 
 			case iOS:
 				particleCount = 1 << 14;
-				fluidScale = 1/10;
-				fluidIterations = 6;
+				// fluidScale = 1/10;
+				// fluidIterations = 6;
+				fluidScale = 1/6;
+				fluidIterations = 12;
 				offScreenScale = 1/2;
 				offScreenFilter = GL.LINEAR;
-        pointSize = 4;
+        pointSize = 1;
 
 		}
 		renderParticlesEnabled = particleCount > 1;
-    // renderParticlesEnabled = false;
 		return simulationQuality = quality;
 	}
 
